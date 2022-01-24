@@ -52,7 +52,6 @@ oam_2: .res 256        ; OAM for odd frames
 
 .segment "ZEROPAGE"
 active_oam: .res 1
-frame: .res 1
 
 .segment "CODE"
 sprite_y_oam_1:         ; Set Y position of 64 sprites in OAM 1
@@ -205,14 +204,14 @@ setup_oam:
   jsr sprite_tile_oam_2
   jsr sprite_attr_oam_2
   lda #0
-  sta frame
+  sta anim_frame
   jsr setup_frame
   rts
 
 setup_frame:
-  lda frame
-  and #%00000100
-  cmp #%00000100
+  lda anim_frame
+  and #%00000010
+  cmp #%00000010
   beq @odd_frame
   lda #>oam_2
   sta active_oam
@@ -221,11 +220,9 @@ setup_frame:
   lda #>oam_1
   sta active_oam
 @end_frame_branch:
-
-; .byte $0F,$20,$28,$16 ; sp0 yellow
-  lda frame
-  and #%00001000
-  cmp #%00001000
+  lda anim_frame
+  and #%00000100
+  cmp #%00000100
   beq @pal1_frame
   ; Second palette
   lda #$20
@@ -244,14 +241,9 @@ setup_frame:
   ldy #19
   sta palette, Y
 @end_pal_branch:
-
-
-
-
   rts
 
 update_ball:
-  inc frame             ; Advance ball animation
   jsr setup_frame
   jsr sprite_x_oam_1    ; Set sprite locations
   jsr sprite_y_oam_1

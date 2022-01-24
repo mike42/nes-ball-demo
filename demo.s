@@ -108,7 +108,6 @@ temp:           .res 1 ; temporary variable
 nmt_update: .res 256 ; nametable update entry buffer for PPU update
 palette:    .res 32  ; palette buffer for PPU update
 
-
 .segment "CODE"
 nmi:
 	; save registers
@@ -149,12 +148,12 @@ nmi:
 	sta $2000 ; set horizontal nametable increment
 	lda $2002
 	lda #$3F
-	sta $2006
-	stx $2006 ; set PPU address to $3F00
+	sta PPUADDR
+	stx PPUADDR ; set PPU address to $3F00
 	ldx #0
 	:
 		lda palette, X
-		sta $2007
+		sta PPUDATA
 		inx
 		cpx #32
 		bcc :-
@@ -164,13 +163,13 @@ nmi:
 	bcs @scroll
 	@nmt_update_loop:
 		lda nmt_update, X
-		sta $2006
+		sta PPUADDR
 		inx
 		lda nmt_update, X
-		sta $2006
+		sta PPUADDR
 		inx
 		lda nmt_update, X
-		sta $2007
+		sta PPUDATA
 		inx
 		cpx nmt_update_len
 		bcc @nmt_update_loop
@@ -213,12 +212,6 @@ nmi:
 irq:
 	rti
 
-;
-; drawing utilities
-;
-
-.segment "CODE"
-
 ; ppu_update: waits until next NMI, turns rendering on (if not already), uploads OAM, palette, and nametable update to PPU
 ppu_update:
 	lda #1
@@ -228,137 +221,30 @@ ppu_update:
 		bne :-
 	rts
 
-; ppu_skip: waits until next NMI, does not update PPU
-ppu_skip:
-	lda nmi_count
-	:
-		cmp nmi_count
-		beq :-
-	rts
-
-; ppu_off: waits until next NMI, turns rendering off (now safe to write PPU directly via $2007)
-ppu_off:
-	lda #2
-	sta nmi_ready
-	:
-		lda nmi_ready
-		bne :-
-	rts
-
-; ppu_address_tile: use with rendering off, sets memory address to tile at X/Y, ready for a $2007 write
-;   Y =  0- 31 nametable $2000
-;   Y = 32- 63 nametable $2400
-;   Y = 64- 95 nametable $2800
-;   Y = 96-127 nametable $2C00
-ppu_address_tile:
-	lda $2002 ; reset latch
-	tya
-	lsr
-	lsr
-	lsr
-	ora #$20 ; high bits of Y + $20
-	sta $2006
-	tya
-	asl
-	asl
-	asl
-	asl
-	asl
-	sta temp
-	txa
-	ora temp
-	sta $2006 ; low bits of Y + X
-	rts
-
-; ppu_update_tile: can be used with rendering on, sets the tile at X/Y to tile A next time you call ppu_update
-ppu_update_tile:
-	pha ; temporarily store A on stack
-	txa
-	pha ; temporarily store X on stack
-	ldx nmt_update_len
-	tya
-	lsr
-	lsr
-	lsr
-	ora #$20 ; high bits of Y + $20
-	sta nmt_update, X
-	inx
-	tya
-	asl
-	asl
-	asl
-	asl
-	asl
-	sta temp
-	pla ; recover X value (but put in A)
-	ora temp
-	sta nmt_update, X
-	inx
-	pla ; recover A value (tile)
-	sta nmt_update, X
-	inx
-	stx nmt_update_len
-	rts
-
-; ppu_update_byte: like ppu_update_tile, but X/Y makes the high/low bytes of the PPU address to write
-;    this may be useful for updating attribute tiles
-ppu_update_byte:
-	pha ; temporarily store A on stack
-	tya
-	pha ; temporarily store Y on stack
-	ldy nmt_update_len
-	txa
-	sta nmt_update, Y
-	iny
-	pla ; recover Y value (but put in Y)
-	sta nmt_update, Y
-	iny
-	pla ; recover A value (byte)
-	sta nmt_update, Y
-	iny
-	sty nmt_update_len
-	rts
-
-;
-; gamepad
-;
-
-PAD_A      = $01
-PAD_B      = $02
-PAD_SELECT = $04
-PAD_START  = $08
-PAD_U      = $10
-PAD_D      = $20
-PAD_L      = $40
-PAD_R      = $80
-
-.segment "CODE"
-
-;
-; main
-;
-
 .segment "RODATA"
-example_palette:
-.byte $0F,$15,$26,$37 ; bg0 purple/pink
-.byte $0F,$09,$19,$29 ; bg1 green
-.byte $0F,$01,$11,$21 ; bg2 blue
-.byte $0F,$00,$10,$30 ; bg3 greyscale
-.byte $0F,$20,$28,$16 ; sp0 yellow
-.byte $0F,$14,$24,$34 ; sp1 purple
-.byte $0F,$1B,$2B,$3B ; sp2 teal
-.byte $0F,$12,$22,$32 ; sp3 marine
+start_palette: ; background last, foreground second
+.byte $0F,$04,$26,$10 ; bg0 purple/grey
+.byte $0F,$09,$19,$29 ; bg1 not used
+.byte $0F,$01,$11,$21 ; bg2 not used
+.byte $0F,$00,$10,$30 ; bg3 not used
+.byte $0F,$20,$28,$16 ; sp0 updated dynamically
+.byte $0F,$14,$24,$34 ; sp1 not used
+.byte $0F,$1B,$2B,$3B ; sp2 not used
+.byte $0F,$12,$22,$32 ; sp3 not used
 
 .segment "ZEROPAGE"
 ball_x: .res 1
 ball_y: .res 1
+y_frame: .res 1       ; frame for Y-position
+anim_frame: .res 1    ; ball animation frame
+ball_dir: .res 0
 
 .segment "CODE"
 main:
 	; setup
 	ldx #0
 	:
-		lda example_palette, X
+		lda start_palette, X
 		sta palette, X
 		inx
 		cpx #32
@@ -369,64 +255,189 @@ main:
 	sta ball_x
 	lda #80
 	sta ball_y
-
+  lda #0
+  sta anim_frame
+  sta ball_dir
   jsr setup_oam
 	jsr update_ball
 	jsr ppu_update
 	; main loop
 @draw:
 	; draw everything and finish the frame
+	jsr ball_physics
 	jsr update_ball
 	jsr ppu_update
 	; keep doing this forever!
 	jmp @draw
 
+PPUADDR = $2006
+PPUDATA = $2007
 
 setup_background:
-	; first nametable empty TODO draw a grid here
+	; clear first nametable
 	lda $2002 ; reset latch
 	lda #$20
-	sta $2006
+	sta PPUADDR
 	lda #$00
-	sta $2006
+	sta PPUADDR
 	; empty nametable
-	lda #0
+	lda #$34
 	ldy #30 ; 30 rows
 	:
 		ldx #32 ; 32 columns
 		:
-			sta $2007
+			sta PPUDATA
 			dex
 			bne :-
 		dey
 		bne :--
+	; set all attributes to 0
+	lda #0
+	ldx #64 ; 64 bytes
+	:
+		sta PPUDATA
+		dex
+		bne :-
+
 	; second nametable empty (not used)
 	lda #$24
-	sta $2006
+	sta PPUADDR
 	lda #$00
-	sta $2006
+	sta PPUADDR
 	; empty nametable
 	lda #0
 	ldy #30 ; 30 rows
 	:
 		ldx #32 ; 32 columns
 		:
-			sta $2007
+			sta PPUDATA
 			dex
 			bne :-
 		dey
 		bne :--
-	; 4 stripes of attribute
-	lda #0
-	ldy #4
+
+  ; draw a grid to first nametable
+	lda $2002 ; reset latch
+	lda #$20
+	sta PPUADDR
+	lda #$60
+  sta PPUADDR
+	ldy #11
+@grid_row:                ; each grid row is 2 roes of tiles
+  lda #$34
+  sta PPUDATA
+  sta PPUDATA
+	ldx #14
 	:
-		ldx #16
-		:
-			sta $2007
-			dex
-			bne :-
-		clc
-		adc #%01010101
-		dey
-		bne :--
+    lda #$30
+    sta PPUDATA
+    lda #$31
+    sta PPUDATA
+  dex
+  bne :-
+  lda #$32
+  sta PPUDATA
+  lda #$34
+  sta PPUDATA
+  sta PPUDATA
+  sta PPUDATA
+	ldx #14
+	:
+    lda #$32
+    sta PPUDATA
+    lda #$34
+    sta PPUDATA
+  dex
+  bne :-
+  lda #$32
+  sta PPUDATA
+  lda #$34
+  sta PPUDATA
+  dey
+  bne @grid_row
+  ; Paste in some defined lines for the end of the screen
+  ldx #16
+  lda #$40
+  clc
+  :
+    sta PPUDATA
+    adc #1
+  dex
+  bne :-
+  ldx #16
+  lda #$60
+  clc
+  :
+    sta PPUDATA
+    adc #1
+  dex
+  bne :-
+  ldx #16
+  lda #$50
+  clc
+  :
+    sta PPUDATA
+    adc #1
+  dex
+  bne :-
+  ldx #16
+  lda #$70
+  clc
+  :
+    sta PPUDATA
+    adc #1
+  dex
+  bne :-
+
+  ldx #32
+  :
+    lda #$33
+    sta PPUDATA
+  dex
+  bne :-
 	rts
+
+ball_physics:
+  jsr ball_physics_x
+  ; set Y
+  inc y_frame
+  ldy y_frame
+  lda ball_loc_y, Y
+  sta ball_y
+  ; set animation frame
+
+  lda ball_x
+; slow mode
+  ror
+  and #%01111111
+  sta anim_frame
+  rts
+
+; lookup table for y-coordinates over two bounces
+ball_loc_y: .byte $96, $93, $90, $8d, $8a, $87, $84, $81, $7e, $7b, $78, $75, $72, $6f, $6c, $69, $66, $63, $60, $5e, $5b, $58, $55, $53, $50, $4e, $4b, $49, $46, $44, $42, $3f, $3d, $3b, $39, $37, $35, $33, $31, $2f, $2d, $2c, $2a, $29, $27, $26, $24, $23, $22, $21, $20, $1f, $1e, $1d, $1c, $1b, $1b, $1a, $1a, $19, $19, $19, $19, $19, $19, $19, $19, $19, $19, $1a, $1a, $1b, $1b, $1c, $1c, $1d, $1e, $1f, $20, $21, $22, $24, $25, $26, $28, $29, $2b, $2d, $2e, $30, $32, $34, $36, $38, $3a, $3c, $3e, $40, $43, $45, $48, $4a, $4c, $4f, $52, $54, $57, $5a, $5c, $5f, $62, $65, $68, $6a, $6d, $70, $73, $76, $79, $7c, $7f, $82, $85, $89, $8c, $8f, $92, $95, $95, $92, $8f, $8c, $89, $85, $82, $7f, $7c, $79, $76, $73, $70, $6d, $6a, $68, $65, $62, $5f, $5c, $5a, $57, $54, $52, $4f, $4c, $4a, $48, $45, $43, $40, $3e, $3c, $3a, $38, $36, $34, $32, $30, $2e, $2d, $2b, $29, $28, $26, $25, $24, $22, $21, $20, $1f, $1e, $1d, $1c, $1c, $1b, $1b, $1a, $1a, $19, $19, $19, $19, $19, $19, $19, $19, $19, $19, $1a, $1a, $1b, $1b, $1c, $1d, $1e, $1f, $20, $21, $22, $23, $24, $26, $27, $29, $2a, $2c, $2d, $2f, $31, $33, $35, $37, $39, $3b, $3d, $3f, $42, $44, $46, $49, $4b, $4e, $50, $53, $55, $58, $5b, $5e, $60, $63, $66, $69, $6c, $6f, $72, $75, $78, $7b, $7e, $81, $84, $87, $8a, $8d, $90, $93, $96
+
+X_MIN = 8
+X_MAX = 184
+BALL_RIGHT = 0
+BALL_LEFT = 1
+
+ball_physics_x:
+  lda ball_dir
+  cmp #BALL_RIGHT         ; branch on ball direction
+  bne @ball_move_left
+  inc ball_x              ; move right
+  lda ball_x
+  cmp #X_MAX              ; check against right wall
+  bne @ball_move_end
+  lda #BALL_LEFT          ; change direction
+  sta ball_dir
+  jmp @ball_move_end
+  @ball_move_left:
+  dec ball_x              ; move left
+  lda ball_x
+  cmp #X_MIN              ; check against left wall
+  bne @ball_move_end
+  lda #BALL_RIGHT         ; change direction
+  sta ball_dir
+  @ball_move_end:
+  rts
