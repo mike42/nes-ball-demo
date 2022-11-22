@@ -43,6 +43,6 @@ def label_to_nl(label_file, nl_file, range_min, range_max):
     print("debug symbols: " + nl_file)
     
 if __name__ == "__main__":
-    label_to_nl("build/table_tennis.labels.txt", "build/table_tennis.nes.ram.nl", 0x0000, 0x7FF)
-    label_to_nl("build/table_tennis.labels.txt", "build/table_tennis.nes.0.nl", 0x8000, 0xBFFF)
-    label_to_nl("build/table_tennis.labels.txt", "build/table_tennis.nes.1.nl", 0xC000, 0xFFFF)
+    label_to_nl("build/demo.labels.txt", "build/demo.nes.ram.nl", 0x0000, 0x7FF)
+    label_to_nl("build/demo.labels.txt", "build/demo.nes.0.nl", 0x8000, 0xBFFF)
+    label_to_nl("build/demo.labels.txt", "build/demo.nes.1.nl", 0xC000, 0xFFFF)
